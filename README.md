@@ -68,15 +68,33 @@ HTTP/1.1 200 OK
 {"total":4,"done":1,"open":3}        ← 4 tasks, so the seed did not run a second time
 ```
 
-**The same check with Docker:**
+**The same check with Docker** (real run on Windows + Docker Desktop, 2026-10-27):
 
-```powershell
-curl.exe -X POST http://localhost:8000/tasks -H "Content-Type: application/json" -d '{\"title\":\"Survive a restart\"}'
-docker compose restart          # restarts BOTH the app and the db containers
-curl.exe http://localhost:8000/tasks
+```text
+> curl -X POST http://localhost:8000/tasks -H "Content-Type: application/json" -d "{\"title\":\"Survive a restart\"}"
+{"id":4,"title":"Survive a restart","done":false,"created_at":"2026-10-27T04:01:20Z","updated_at":"2026-10-27T04:01:20Z"}
+
+> docker compose restart          # restarts BOTH the app and the db containers
+ - Container crud-api-postgres-db-1  Restarting
+ - Container crud-api-postgres-app-1 Restarting
+
+> curl http://localhost:8000/tasks
+[{"id":1,"title":"Read the A1 brief",...},{"id":2,...},{"id":3,...},
+ {"id":4,"title":"Survive a restart","done":false,"created_at":"2026-10-27T04:01:20Z","updated_at":"2026-10-27T04:01:20Z"}]
 ```
 
 The task is still there, because it's stored in the `pgdata` volume and not inside the container.
+
+**A bug the restart exposed:** the first try answered `Empty reply from server`. `docker compose restart`
+restarts Postgres and the app at the same moment, and `depends_on: service_healthy` only applies to `up`, not to
+`restart`. So the app can start before Postgres accepts connections. A few seconds later the same `curl` worked.
+
+The fix has two parts:
+
+- the app now waits for the database, up to 30 s, logging `waiting for Postgres...`
+- the app service has `restart: unless-stopped`
+
+After the fix, a second `docker compose restart` answered with the full list straight away.
 
 ## Stretch: index + EXPLAIN ANALYZE
 
@@ -85,9 +103,6 @@ The task is still there, because it's stored in the `pgdata` volume and not insi
 
 ## Limitations
 
-- `docker-compose.yml` wasn't run in the build environment, because Docker wasn't available there. The Postgres code
-  path was tested against a local Postgres 16 server. The compose stack itself still needs to be checked on a machine
-  with Docker (see *Run the whole stack* above).
 - The schema is created by an idempotent SQL file, not a migration tool. That's fine for one table, but a real project
   would use Alembic.
 
@@ -96,5 +111,5 @@ The task is still there, because it's stored in the `pgdata` volume and not insi
 Built **with an AI assistant (Claude)**, and stated openly here. Verified by running it:
 
 - 15 tests on SQLite and 15 on Postgres
-- the restart transcript
+- the restart transcript (local Postgres and Docker Desktop)
 - the EXPLAIN output
