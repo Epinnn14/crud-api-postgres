@@ -19,6 +19,7 @@ services:
 
   app:
     build: .
+    restart: unless-stopped     # if it ever stops on its own, Docker brings it back
     environment:
       # Inside the compose network the database host is the service name "db", not localhost.
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}

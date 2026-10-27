@@ -1,6 +1,7 @@
 """Postgres implementation of TaskRepository (A3). Same interface, same behaviour as SQLite."""
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,7 +25,22 @@ class PostgresTaskRepository:
     def _connect(self) -> psycopg.Connection:
         return psycopg.connect(self.url, row_factory=dict_row)
 
+    def _wait_for_database(self, timeout_s: float = 30.0) -> None:
+        """On `docker compose restart` the app and Postgres restart together, and Postgres needs a few seconds
+        before it accepts connections. Wait for it instead of crashing on startup."""
+        deadline = time.monotonic() + timeout_s
+        while True:
+            try:
+                psycopg.connect(self.url, connect_timeout=3).close()
+                return
+            except psycopg.OperationalError:
+                if time.monotonic() > deadline:
+                    raise
+                print("waiting for Postgres...", flush=True)
+                time.sleep(1)
+
     def init(self) -> None:
+        self._wait_for_database()
         with self._connect() as conn:  # `with` = one transaction, committed on success
             conn.execute(SCHEMA.read_text())
             if conn.execute("SELECT COUNT(*) AS n FROM tasks").fetchone()["n"] == 0:
